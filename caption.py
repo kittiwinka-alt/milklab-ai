@@ -1,21 +1,33 @@
-# caption.py
 import os
+from google import genai
 from dotenv import load_dotenv
 
-# 1. โหลดค่าจากไฟล์ .env ตามสเปกใบงาน
+# 1. โหลดค่าจากไฟล์ .env
 load_dotenv()
+
+# 2. ดึงคีย์จาก environment variable
+api_key = os.getenv("GEMINI_API_KEY")
+
+# 3. ตั้งค่า Client ด้วยคีย์ที่ดึงมา
+client = genai.Client(api_key=api_key)
 
 menu_name = "ลาเต้น้ำผึ้ง"
 price = "65 บาท"
 
-# 2. จำลองผลลัพธ์ของระบบตอบกลับ (Mock Response) ตามสไตล์คำสั่งในใบงาน
-mock_response = """
-Cute: หอมละมุนต้อนรับวันใหม่ด้วย "ลาเต้น้ำผึ้ง" นุ่มนวลจากนมสดแท้ ผสานความหวานจากน้ำผึ้งธรรมชาติ แก้วนี้แค่ 65 บาทเท่านั้นจ้าาา 🍯✨ #MilkLab #ลาเต้น้ำผึ้ง #คาเฟ่ขอนแก่น
+prompt = f"""
+You are a marketing copywriter for cafés.
+Generate 3 Instagram caption variants for a café named MilkLab based on this menu: {menu_name} price {price}.
+The output must be strictly in Thai with a casual tone, and follow this exact format:
 
-Minimal: MilkLab - Honey Latte. Espresso shot with fresh milk and organic honey. 65 THB.
-
-Gen-Z: ลาเต้น้ำผึ้ง MilkLab แก้วนี้คือถูกต้อง! หวานละมุนแบบตะโกน นัวนมสุดๆ ในราคา 65 บาท ตัวแม่ต้องมาลองละป่ะแกรรรร ☕️🔥 #ของดีบอกต่อ
+Cute: [ข้อความสไตล์อบอุ่น เอาใจ emoji เยอะ]
+Minimal: [ข้อความสไตล์สั้น เรียบ หรู ห้ามใช้ emoji]
+Gen-Z: [ข้อความสไตล์วัยรุ่น ใช้สแลงฮิตๆ]
 """
 
-# 3. แสดงผลลัพธ์บน Terminal 
-print(mock_response.strip())
+# 4. เรียกใช้โมเดล gemini-3.5-flash
+response = client.models.generate_content(
+    model='gemini-3.5-flash-lite',
+    contents=prompt,
+)
+
+print(response.text)
