@@ -30,9 +30,11 @@ jobs:
     - name: Run Sales Logger
       env:
         GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
-        # เพิ่ม Environment Variables สำหรับดึงค่า Bot Secrets มาใช้
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        # ย้ายการเรียก Secret ของ Service Account มาไว้ใน env
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
       run: |
-        echo "${{ secrets.GOOGLE_SERVICE_ACCOUNT }}" > service-account.json
+        # เรียกใช้ตัวแปรจาก env โดยตรง ป้องกันปัญหาเครื่องหมายคำพูดตีกัน
+        echo "$GOOGLE_CREDENTIALS" > service-account.json
         python sales_logger.py --menu "ชาไทย" --qty 1 --price 55
