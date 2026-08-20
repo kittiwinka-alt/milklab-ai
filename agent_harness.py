@@ -1,102 +1,86 @@
+import streamlit as st
 import os
 import json
-import argparse
-import google.generativeai as genai
-from datetime import datetime, timezone, timedelta
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
-# โหลดค่า API Keys จากไฟล์ .env
+# โหลด API Key
 load_dotenv()
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# ฟังก์ชันสำหรับเขียน Log ลงไฟล์และพิมพ์ออกหน้าจอ
-def write_trace(log_text):
-    with open("agent_trace.log", "a", encoding="utf-8") as f:
-        f.write(log_text + "\n")
-    print(log_text)
+st.title("🤖 Camera Craft: AI Agent Harness")
+st.write("ทดสอบระบบ Agent วิเคราะห์คำสั่งซื้อร้านกล้อง")
 
-# --- จำลอง Tools ทั้ง 3 ตัวตามโจทย์ ---
-def log_sale(menu, qty, price):
-    th_tz = timezone(timedelta(hours=7))
-    timestamp = datetime.now(th_tz).strftime('%Y-%m-%dT%H:%M:%S+07')
-    return f"log_sale OK: row appended at {timestamp}"
+# 1. เปลี่ยน Tool Schema ให้เข้ากับธุรกิจ Camera Craft
+camera_tool = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="log_camera_sale",
+            description="ใช้บันทึกรายการขายเมื่อลูกค้าตกลงซื้อกล้องหรือเลนส์ และทราบข้อมูลครบถ้วนแล้ว",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "brand": types.Schema(type=types.Type.STRING, description="แบรนด์กล้อง เช่น Panasonic, Sony, เลนส์ Sony"),
+                    "model": types.Schema(type=types.Type.STRING, description="รุ่นกล้อง หรือ เลนส์ เช่น Lumix GF8, 50mm f/1.8"),
+                    "price": types.Schema(type=types.Type.NUMBER, description="ราคาขายเป็นตัวเลข")
+                },
+                required=["brand", "model", "price"]
+            )
+        )
+    ]
+)
 
-def query_sales(date):
-    return f"query_sales OK: found records for {date}"
+# 2. ปรับ Prompt ให้เข้ากับบริบทใหม่
+SYSTEM_INSTRUCTION = """คุณคือ AI Agent รับออเดอร์ของร้าน Camera Craft ร้านขายกล้องมือสอง
+หน้าที่ของคุณคือคุยกับลูกค้าและรับออเดอร์ หากลูกค้าตกลงซื้อสินค้า ให้คุณดึงข้อมูล แบรนด์ รุ่น และราคา แล้วเรียกใช้เครื่องมือ log_camera_sale ทันที
+หากข้อมูลไม่ชัดเจน ให้สอบถามลูกค้าเพิ่มเติมก่อนทำการบันทึก"""
 
-def send_alert(message):
-    return f"send_alert OK: message sent"
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-def main():
-    # 1. รับคำสั่งจาก CLI ผ่าน --cmd
-    parser = argparse.ArgumentParser(description="Agent Harness")
-    parser.add_argument("--cmd", type=str, required=True, help="คำสั่งภาษาไทย")
-    args = parser.parse_args()
-    
-    user_cmd = args.cmd
-    
-    # พิมพ์ Trace Log บรรทัดแรก: รับคำสั่งผู้ใช้
-    write_trace(f"[USER] {user_cmd}")
-    
-    # 2. ส่งคำสั่งให้ Gemini วิเคราะห์ (บังคับตอบเป็น JSON)
-    prompt = f"""
-    คุณคือระบบ AI Agent สำหรับร้านค้า หน้าที่ของคุณคือวิเคราะห์คำสั่งภาษาไทยและเลือกใช้ Tool ที่เหมาะสม
-    
-    Tool Schema ที่มีให้เลือก:
-    1. log_sale: บันทึกยอดขาย (รับ arguments: menu เป็น string, qty เป็น int, price เป็น float)
-    2. query_sales: ดูยอดขาย (รับ arguments: date เป็น string รูปแบบ YYYY-MM-DD)
-    3. send_alert: ส่งแจ้งเตือน (รับ arguments: message เป็น string)
-    
-    คำสั่งของผู้ใช้: "{user_cmd}"
-    
-    จงตอบกลับมาเป็น JSON เท่านั้น โดยใช้รูปแบบนี้ (ไม่ต้องมีเครื่องหมาย markdown ```json):
-    {{
-        "tool": "ชื่อ tool ที่เลือก",
-        "args": {{
-            "ชื่อพารามิเตอร์": "ค่าพารามิเตอร์"
-        }},
-        "reply": "ข้อความตอบกลับผู้ใช้แบบสั้นๆ (เช่น บันทึกแล้วยอด xx บาท)"
-    }}
-    """
-    
-    try:
-        model = genai.GenerativeModel('gemini-3.5-flash-lite')
-        response = model.generate_content(prompt)
-        
-        # 3. Parse response เป็น Tool call
-        raw_text = response.text.replace("```json", "").replace("```", "").strip()
-        llm_decision = json.loads(raw_text)
-        
-        tool_name = llm_decision.get("tool")
-        tool_args = llm_decision.get("args", {})
-        user_reply = llm_decision.get("reply", "ดำเนินการเรียบร้อย")
-        
-        # จัดรูปแบบ args ให้ตรงตามสเปก Trace Log
-        args_str = ", ".join([f"{k}: {v}" for k, v in tool_args.items()])
-        
-        # พิมพ์ Trace Log บรรทัดที่สอง: AI คิด
-        write_trace(f"[LLM]  tool={tool_name} args={{{args_str}}}")
-        
-        # 4. เรียกใช้ Tool จริง
-        tool_result = ""
-        if tool_name == "log_sale":
-            tool_result = log_sale(tool_args.get("menu"), int(tool_args.get("qty", 1)), float(tool_args.get("price", 0)))
-        elif tool_name == "query_sales":
-            tool_result = query_sales(tool_args.get("date"))
-        elif tool_name == "send_alert":
-            tool_result = send_alert(tool_args.get("message"))
-        else:
-            tool_result = f"Error: Tool {tool_name} not found"
+# แสดงประวัติแชท
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# รับข้อความจากผู้ใช้
+if prompt := st.chat_input("ลองพิมพ์สั่งซื้อ เช่น 'รับ GF8 ราคา 4500 ครับ'"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Agent กำลังวิเคราะห์..."):
+            # ส่งให้ Gemini ประมวลผลพร้อมแนบ Tool ไปด้วย
+            response = client.models.generate_content(
+                model="gemini-3.5-flash-lite",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    tools=[camera_tool],
+                    temperature=0.2
+                )
+            )
             
-        # พิมพ์ Trace Log บรรทัดที่สาม: ผลลัพธ์จาก Tool
-        write_trace(f"[TOOL] {tool_result}")
-        
-        # พิมพ์ Trace Log บรรทัดสุดท้าย: ตอบกลับผู้ใช้
-        write_trace(f"[USER] ←  {user_reply}")
-        write_trace("-" * 40) # ขีดเส้นคั่นแต่ละรอบให้ดูง่าย
-        
-    except Exception as e:
-        write_trace(f"[ERROR] เกิดข้อผิดพลาด: {str(e)}")
-
-if __name__ == "__main__":
-    main()
+            # ตรวจสอบว่า AI ตัดสินใจเรียกใช้ Tool (Function Calling) หรือไม่
+            if response.function_calls:
+                for fc in response.function_calls:
+                    if fc.name == "log_camera_sale":
+                        args = fc.args
+                        st.success(f"🛠️ Agent ตัดสินใจเรียกใช้ Tool: {fc.name}")
+                        st.json({
+                            "Action": "ส่งข้อมูลไปหลังบ้าน (Sales Logger)",
+                            "Extracted_Data": {
+                                "Brand": args.get("brand"),
+                                "Model": args.get("model"),
+                                "Price": args.get("price")
+                            }
+                        })
+                        reply_text = f"ระบบได้รับออเดอร์ {args.get('brand')} {args.get('model')} ในราคา {args.get('price')} บาท เรียบร้อยแล้วครับ ขอบคุณที่อุดหนุน Camera Craft ครับ! 📸"
+                        st.markdown(reply_text)
+                        st.session_state.messages.append({"role": "assistant", "content": reply_text})
+            else:
+                # ถ้าไม่ใช้ Tool ก็ตอบกลับธรรมดา
+                st.markdown(response.text)
+                st.session_state.messages.append({"role": "assistant", "content": response.text})

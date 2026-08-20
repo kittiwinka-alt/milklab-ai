@@ -21,16 +21,15 @@ def log_trace(trace_id, span_name, latency, details):
         "latency_ms": round(latency * 1000, 2),
         "details": details
     }
-    # บันทึกลงไฟล์ (Append)
     with open("traces.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(trace_data, ensure_ascii=False) + "\n")
     return trace_data
 
-# --- ข้อ 1-3: โหลดข้อมูล แตก Chunk สร้าง Embedding และ Faiss Index ---
+# --- โหลดข้อมูล แตก Chunk สร้าง Embedding และ Faiss Index ---
 @st.cache_resource
 def init_rag_system():
-    # 1. โหลด menu_kb.md และ Split เป็น chunk (หั่นตามย่อหน้า)
-    with open("menu_kb.md", "r", encoding="utf-8") as f:
+    # 1. เปลี่ยนมาอ่านไฟล์ camera_kb.md แทนของเก่า
+    with open("camera_kb.md", "r", encoding="utf-8") as f:
         text = f.read()
     chunks = [c.strip() for c in text.split('\n\n') if c.strip()]
     
@@ -47,7 +46,7 @@ def init_rag_system():
 
 chunks, embed_model, faiss_index = init_rag_system()
 
-# --- ข้อ 5: ฟังก์ชัน Retrieve Top-k ---
+# --- ฟังก์ชัน Retrieve Top-k ---
 def retrieve_top_k(query, k=3, trace_id=None):
     start_time = time.time()
     
@@ -56,19 +55,29 @@ def retrieve_top_k(query, k=3, trace_id=None):
     retrieved_chunks = [chunks[i] for i in indices[0]]
     
     latency = time.time() - start_time
-    # เก็บ Log ของ Span: retrieve_top_k
     trace_info = log_trace(trace_id, "retrieve_top_k", latency, {"query": query, "top_k": k, "found": retrieved_chunks})
     
     return retrieved_chunks, trace_info
 
-# --- ข้อ 6: ฟังก์ชัน Generate Answer พร้อม Span ---
+# --- ฟังก์ชัน Generate Answer ---
 def generate_answer(query, context_chunks, trace_id=None):
     start_time = time.time()
     
     context_text = "\n".join(context_chunks)
-    prompt = f"คุณคือแชทบอทร้าน MilkLab จงตอบคำถามโดยอิงจากข้อมูลต่อไปนี้เท่านั้น:\n\n{context_text}\n\nคำถาม: {query}"
     
-    # ใช้ gemini-3.5-flash-lite ตัวพิมพ์เล็กทั้งหมด และต้องไม่มีเว้นวรรค
+    # 🌟 ปรับ Prompt ใหม่ให้บอทพูดจาเพราะขึ้น เป็นกันเอง และดูเป็นมืออาชีพ
+    prompt = f"""คุณคือแอดมินผู้เชี่ยวชาญของร้าน Camera Craft ร้านขายกล้องมือสอง
+กรุณาตอบคำถามลูกค้าด้วยน้ำเสียงที่สุภาพ เป็นกันเอง กระตือรือร้นที่จะช่วยเหลือ และลงท้ายด้วย "ครับ" หรือ "ค่ะ" เสมอ
+
+กฎสำคัญ: 
+1. จงตอบคำถามโดยอิงจาก "ข้อมูลร้านค้า" ด้านล่างนี้เท่านั้น 
+2. หากลูกค้าถามหาสินค้าหรือข้อมูลที่ไม่มีในนี้ ห้ามแต่งข้อมูลขึ้นมาเองเด็ดขาด ให้ตอบอย่างสุภาพทำนองว่า "ต้องขออภัยด้วยครับ ตอนนี้ทางร้านยังไม่มีสินค้าแบรนด์นี้/รุ่นนี้นะครับ" หรือ "ขออภัยครับ แอดมินยังไม่มีข้อมูลในส่วนนี้นะครับ"
+
+ข้อมูลร้านค้า:
+{context_text}
+
+คำถามจากลูกค้า: {query}"""
+    
     response = client.models.generate_content(
         model="gemini-3.5-flash-lite",
         contents=prompt
@@ -79,8 +88,9 @@ def generate_answer(query, context_chunks, trace_id=None):
     
     return response.text, trace_info
 
-# --- ข้อ 4: สร้าง Chat UI ด้วย Streamlit ---
-st.title("🥤 MilkLab RAG Chatbot")
+# --- สร้าง Chat UI ด้วย Streamlit ---
+# เปลี่ยนชื่อ Title ให้เข้ากับแบรนด์ใหม่
+st.title("📸 Camera Craft RAG Chatbot")
 
 # เก็บประวัติการแชท
 if "messages" not in st.session_state:
@@ -95,27 +105,22 @@ for msg in st.session_state.messages:
                 st.json(msg["trace"])
 
 # ช่องรับข้อความจากผู้ใช้
-if prompt := st.chat_input("พิมพ์คำถามของคุณที่นี่..."):
+if prompt := st.chat_input("สอบถามสเปกกล้องหรือเลนส์ได้เลยครับ..."):
     # 1. แสดงคำถาม
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # สร้าง trace_id เดียวกันสำหรับลูปนี้
     current_trace_id = str(uuid.uuid4())
 
     # 2. ให้ AI คิดและตอบ
     with st.chat_message("assistant"):
-        with st.spinner("กำลังค้นหาข้อมูล..."):
-            # ดึงข้อมูล Top-k
+        with st.spinner("กำลังค้นหาข้อมูลสเปก..."):
             retrieved_chunks, retrieve_trace = retrieve_top_k(prompt, k=3, trace_id=current_trace_id)
-            
-            # สร้างคำตอบ
             answer, gen_trace = generate_answer(prompt, retrieved_chunks, trace_id=current_trace_id)
             
             st.markdown(answer)
             
-            # นำ Trace มาแสดงใน Expander ใต้คำตอบ
             combined_trace = [retrieve_trace, gen_trace]
             with st.expander("ดู Trace Log"):
                 st.json(combined_trace)

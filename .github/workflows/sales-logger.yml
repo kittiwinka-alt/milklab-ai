@@ -25,7 +25,7 @@ jobs:
       # เพิ่ม requests เข้าไปสำหรับใช้ยิง API ส่งข้อความเข้า Bot
       run: |
         python -m pip install --upgrade pip
-        pip install gspread google-auth python-dotenv requests
+        pip install gspread google-auth python-dotenv requests streamlit
 
     - name: Run Sales Logger
       env:
